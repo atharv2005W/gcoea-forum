@@ -1,0 +1,35 @@
+// ══════════════════════════════════════════════════════
+//  GCOEA Forum — Firebase Setup
+//  All Firebase config comes from .env file (secure)
+// ══════════════════════════════════════════════════════
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+
+// Auth with LONG-TERM persistence (user stays logged in 3+ days)
+export const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch(console.error);
+
+// Firestore database
+export const db = getFirestore(app);
+
+// Admin email (from .env — not visible in source code)
+export const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || '';
+
+export default app;

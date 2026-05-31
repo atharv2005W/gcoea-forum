@@ -1,0 +1,123 @@
+rules_version = '2';
+// ═══════════════════════════════════════════════════════════
+//  GCOEA FORUM — Firestore Security Rules
+//  Upload these in: Firebase Console → Firestore → Rules
+// ═══════════════════════════════════════════════════════════
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper Functions ────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUser().role == "admin";
+    }
+
+    function isMod() {
+      return isSignedIn() && getUser().role in ["admin", "moderator"];
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function notBanned() {
+      return isSignedIn() && getUser().get("isBanned", false) == false;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(["name", "email", "branch", "year", "role"]);
+    }
+
+    // ── Users Collection ───────────────────────────────────
+    match /users/{uid} {
+      // Anyone logged in can see members
+      allow read: if isSignedIn();
+
+      // New user can create their own profile (role must be "member")
+      allow create: if isOwner(uid)
+        && isValidUser(request.resource.data)
+        && request.resource.data.role == "member"
+        && request.resource.data.isBanned == false;
+
+      // Users can update own profile BUT cannot change role or ban status
+      allow update: if (
+          isOwner(uid)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "isBanned"])
+        ) || isAdmin();
+
+      // Only admin can delete users
+      allow delete: if isAdmin();
+    }
+
+    // ── Posts Collection ────────────────────────────────────
+    match /posts/{postId} {
+      // Any logged-in user can read posts
+      allow read: if isSignedIn();
+
+      // Any non-banned user can create posts
+      allow create: if notBanned()
+        && request.resource.data.authorId == request.auth.uid;
+
+      // Author can update own post (but not pin/unpin — only mods)
+      allow update: if (
+          isOwner(resource.data.authorId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["pinned"])
+        ) || isMod();
+
+      // Author can delete own post (within 1 hour), or mod/admin anytime
+      allow delete: if isOwner(resource.data.authorId) || isMod();
+
+      // ── Comments Subcollection ───────────────────────────
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if notBanned()
+          && request.resource.data.authorId == request.auth.uid;
+        allow delete: if isOwner(resource.data.authorId) || isMod();
+        allow update: if false; // Comments cannot be edited (delete and re-post)
+      }
+    }
+
+    // ── Messages Collection ─────────────────────────────────
+    // Structure: messages/{chatKey}/msgs/{msgId}
+    match /messages/{chatKey} {
+      // Only participants can see the chat
+      allow read: if isSignedIn();
+
+      match /msgs/{msgId} {
+        allow read: if isSignedIn();
+        // Can only send message as yourself, and must not be banned
+        allow create: if notBanned()
+          && request.resource.data.from == request.auth.uid;
+        // Can delete own message (within 1 hour) or admin can delete
+        allow delete: if isOwner(resource.data.from) || isAdmin();
+        allow update: if false;
+      }
+    }
+
+    // ── Categories Collection ───────────────────────────────
+    match /categories/{catId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin(); // Only admin can add/remove categories
+    }
+
+    // ── Settings (Announcement etc.) ────────────────────────
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Audit Log ────────────────────────────────────────────
+    match /auditLog/{logId} {
+      allow read: if isMod();
+      allow create: if isMod();
+      allow update, delete: if false; // Audit logs are permanent
+    }
+  }
+}
